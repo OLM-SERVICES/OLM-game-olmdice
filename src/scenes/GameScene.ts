@@ -14,7 +14,6 @@ export class GameScene extends Phaser.Scene {
   private PARENT_ORIGIN: string = '*'
 
   private isPlacing: boolean = false
-  private isAuthenticated: boolean = false
   private currentBalance: number = 0
   private currentStake: number = 500
   private threshold: number = 50
@@ -41,7 +40,6 @@ export class GameScene extends Phaser.Scene {
   private playBtn!:        Phaser.GameObjects.Graphics
   private playBtnText!:    Phaser.GameObjects.Text
   private playBtnHit!:     Phaser.GameObjects.Rectangle
-  private playBtnVisible:  boolean = false
   private playBtnY:        number = 0
 
   // Stats
@@ -106,7 +104,6 @@ export class GameScene extends Phaser.Scene {
 
     this.bridge.onInit((balance: number) => {
       this.currentBalance = balance
-      this.isAuthenticated = true
       window.parent.postMessage({ type: 'BALANCE_UPDATE', payload: { balance } }, this.PARENT_ORIGIN)
     })
     this.bridge.onResult((result: BetResult) => this.handleResult(result))
