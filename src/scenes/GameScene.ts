@@ -138,6 +138,17 @@ export class GameScene extends Phaser.Scene {
 
     this.scale.on('resize', this.handleResize, this)
     this.setupUI()
+
+    // Safety net: on mobile, canvas.clientWidth/clientHeight often hasn't
+    // settled to its true final value at the exact instant create() runs
+    // (address bar collapsing, iframe layout timing). setupUI() bakes the
+    // Play button position in as a fixed pixel offset from H, so a bad
+    // initial read pushes it off the bottom of the real viewport with
+    // nothing to correct it afterwards. This second pass re-measures and
+    // rebuilds once the layout has had a moment to settle.
+    this.time.delayedCall(150, () => {
+      if (!this.isPlacing) this.setupUI()
+    })
   }
 
   private handleResize() {
@@ -303,6 +314,13 @@ export class GameScene extends Phaser.Scene {
 
     this.uiInitialized = true
     this.startTitleGlitch()
+
+    // If this is a rebuild (resize/orientation change) after the player
+    // already picked OVER/UNDER, resync the stats row and Play button to
+    // that state — otherwise a resize mid-selection would visually reset
+    // to "Select OVER or UNDER" while this.direction is still set.
+    this.updateStatsDisplay()
+    this.refreshPlayButton()
   }
 
   // ─────────────────────────────────────────────────────────────────────────
