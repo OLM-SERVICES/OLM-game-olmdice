@@ -18,15 +18,14 @@ export class GameScene extends Phaser.Scene {
   private currentBalance: number = 0
   private currentStake: number = 500
   private threshold: number = 50
-  // null = nothing chosen yet (on load and after each round)
   private direction: 'OVER' | 'UNDER' | null = null
 
   // Slider
   private sliderTrack!: Phaser.GameObjects.Graphics
-  private sliderFill!: Phaser.GameObjects.Graphics
-  private sliderGlow!: Phaser.GameObjects.Graphics
+  private sliderFill!:  Phaser.GameObjects.Graphics
+  private sliderGlow!:  Phaser.GameObjects.Graphics
   private sliderThumb!: Phaser.GameObjects.Graphics
-  private sliderHit!: Phaser.GameObjects.Rectangle
+  private sliderHit!:   Phaser.GameObjects.Rectangle
 
   // Buttons
   private overContainer!:  Phaser.GameObjects.Container
@@ -37,6 +36,13 @@ export class GameScene extends Phaser.Scene {
   private underText!: Phaser.GameObjects.Text
   private btnW: number = 0
   private btnH: number = 0
+
+  // Play button (in-canvas, fullscreen mode)
+  private playBtn!:        Phaser.GameObjects.Graphics
+  private playBtnText!:    Phaser.GameObjects.Text
+  private playBtnHit!:     Phaser.GameObjects.Rectangle
+  private playBtnVisible:  boolean = false
+  private playBtnY:        number = 0
 
   // Stats
   private multiplierText!: Phaser.GameObjects.Text
@@ -114,6 +120,9 @@ export class GameScene extends Phaser.Scene {
     this.messageHandler = (event: MessageEvent) => {
       if (this.PARENT_ORIGIN !== '*' && event.origin !== this.PARENT_ORIGIN) return
       const { type, payload } = event.data || {}
+      // In fullscreen mode page.tsx sends PLACE_BET after receiving PICK_SELECTED.
+      // We only send PICK_SELECTED from the Play button, so PLACE_BET arrives here
+      // with the stake already set by the top bar.
       if (type === 'PLACE_BET') {
         if (this.isPlacing) return
         this.currentStake = payload.stake
@@ -161,7 +170,7 @@ export class GameScene extends Phaser.Scene {
     this.rootContainer = this.add.container(0, 0)
     this.cameras.main.setBackgroundColor(BG_COLOR)
 
-    // ── Subtle background grid ─────────────────────────────────────────
+    // ── Background grid ────────────────────────────────────────────────
     this.bgGrid = this.add.graphics()
     this.bgGrid.lineStyle(1, 0x9B4DFF, 0.045)
     const GRID_SZ = 48
@@ -174,37 +183,49 @@ export class GameScene extends Phaser.Scene {
     this.aurora2 = this.add.graphics()
     this.rootContainer.add([this.aurora1, this.aurora2])
 
-    // ── Layout constants ────────────────────────────────────────────────
-    // We work purely top-down here so each zone is independent.
-    // Generous vertical gaps prevent the "too dense" look.
+    // ── Layout — bottom-up so Play button is always on screen ──────────
+    //
+    // Pin from bottom:
+    //   24px  bottom margin
+    //   48px  Play button
+    //   12px  gap
+    //   48px  OVER / UNDER buttons
+    //   18px  gap
+    //   stats row (multiplier + win %)
+    //   18px  gap
+    //   slider
+    //   14px  gap
+    //   threshold number
+    //   dice zone (fills remaining space)
+    //   title + subtitle at top
 
-    const titleSize  = Math.round(Math.min(W * 0.095, 36))
-    const subSize    = Math.round(Math.min(W * 0.028, 11))
-    const titleY     = Math.max(24, H * 0.052)
-    const subY       = titleY + Math.round(titleSize * 0.72) + 8
+    const PLAY_BTN_H   = 48
+    const PLAY_MARGIN  = 24
+    const DIR_BTN_H    = 44
+    const DIR_GAP      = 12
 
-    // Dice sits between subtitle and slider — takes ~35% of canvas height
-    const diceTop    = subY + subSize + 18
-    const diceZoneH  = H * 0.35
-    this.diceSize    = Math.round(Math.min(W * 0.35, diceZoneH * 0.78, 150))
-    const diceY      = diceTop + diceZoneH / 2
+    this.playBtnY      = H - PLAY_MARGIN - PLAY_BTN_H / 2
+    const dirBtnY      = this.playBtnY - PLAY_BTN_H / 2 - DIR_GAP - DIR_BTN_H / 2
+    const statsY       = dirBtnY - DIR_BTN_H / 2 - 18 - 10
+    const sliderZoneY  = statsY - 22 - 10
+    const threshY      = sliderZoneY - 52 - 14
+    const threshSize   = Math.round(Math.min(W * 0.115, 44))
 
-    // Threshold number — just below dice zone
-    const threshY    = diceTop + diceZoneH + 8
-    const threshSize = Math.round(Math.min(W * 0.115, 44))
+    const titleSize    = Math.round(Math.min(W * 0.095, 36))
+    const subSize      = Math.round(Math.min(W * 0.028, 11))
+    const titleY       = Math.max(24, H * 0.052)
+    const subY         = titleY + Math.round(titleSize * 0.72) + 8
 
-    // Slider — below threshold
-    const sliderGapT = 14
-    const sliderZoneY = threshY + threshSize / 2 + 16 + sliderGapT
+    // Dice fills the zone between subtitle and threshold number
+    const diceTop      = subY + subSize + 14
+    const diceBottom   = threshY - threshSize / 2 - 10
+    const diceZoneH    = diceBottom - diceTop
+    this.diceSize      = Math.round(Math.min(W * 0.30, diceZoneH * 0.70, 132))
+    const diceY        = diceTop + diceZoneH / 2
+    const resultLabelY = diceBottom - 2
 
-    // Stats row — below slider
-    const statsGap   = 22
-    const statsY     = sliderZoneY + 52 + statsGap
-
-    // Buttons — below stats
-    this.btnH  = Math.round(Math.min(50, H * 0.063))
-    this.btnW  = Math.round(W * 0.38)
-    const btnY = statsY + 16 + this.btnH / 2 + 10
+    this.btnH = DIR_BTN_H
+    this.btnW = Math.round(W * 0.38)
 
     // ── Title ──────────────────────────────────────────────────────────
     this.titleGlow = this.add.text(cx, titleY, 'OLM DICE', {
@@ -221,17 +242,14 @@ export class GameScene extends Phaser.Scene {
     this.rootContainer.add(this.titleMain)
 
     this.rootContainer.add(
-      this.add.text(cx, subY, 'SLIDE · ROLL · WIN BIG', {
-        fontSize: `${subSize}px`, fontFamily: 'Arial, sans-serif',
-        color: '#7B4DBF',
+      this.add.text(cx, subY, 'SLIDE · PICK · ROLL · WIN BIG', {
+        fontSize: `${subSize}px`, fontFamily: 'Arial, sans-serif', color: '#7B4DBF',
       }).setOrigin(0.5)
     )
 
     // ── Dice ───────────────────────────────────────────────────────────
     this.createDice(cx, diceY)
 
-    // Roll result label — below dice, above threshold
-    const resultLabelY = diceTop + diceZoneH - 4
     this.rollResultText = this.add.text(cx, resultLabelY, '', {
       fontSize: '12px', fontFamily: 'Arial, sans-serif', color: '#8866CC',
     }).setOrigin(0.5)
@@ -244,10 +262,10 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5)
     this.rootContainer.add(this.thresholdText)
 
-    // ── Slider ────────────────────────────────────────────────────────
+    // ── Slider ─────────────────────────────────────────────────────────
     this.setupSlider(W, sliderZoneY)
 
-    // ── Stats row ─────────────────────────────────────────────────────
+    // ── Stats row ──────────────────────────────────────────────────────
     const statSize = Math.round(Math.min(W * 0.044, 17))
     const statXL   = cx - W * 0.22
     const statXR   = cx + W * 0.22
@@ -264,15 +282,18 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5)
     this.rootContainer.add(this.winChanceText)
 
-    const dividerLine = this.add.graphics()
-    dividerLine.lineStyle(1, 0x9B4DFF, 0.25)
-    dividerLine.lineBetween(cx, statsY - 10, cx, statsY + 10)
-    this.rootContainer.add(dividerLine)
+    const divLine = this.add.graphics()
+    divLine.lineStyle(1, 0x9B4DFF, 0.25)
+    divLine.lineBetween(cx, statsY - 10, cx, statsY + 10)
+    this.rootContainer.add(divLine)
 
-    // ── Direction buttons ─────────────────────────────────────────────
-    this.setupDirectionButtons(W, btnY)
+    // ── OVER / UNDER buttons ───────────────────────────────────────────
+    this.setupDirectionButtons(W, dirBtnY)
 
-    // ── Overlay ───────────────────────────────────────────────────────
+    // ── Play button (in-canvas, fullscreen) ────────────────────────────
+    this.setupPlayButton(W)
+
+    // ── Overlay ────────────────────────────────────────────────────────
     this.overlay = this.add.graphics().setVisible(false).setDepth(10)
     this.overlayText = this.add.text(cx, H / 2 - 36, '', {
       fontSize: '56px', fontStyle: 'bold',
@@ -285,6 +306,100 @@ export class GameScene extends Phaser.Scene {
 
     this.uiInitialized = true
     this.startTitleGlitch()
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // PLAY BUTTON
+  // ─────────────────────────────────────────────────────────────────────────
+  private setupPlayButton(W: number) {
+    const bw = W - 48
+    const bh = 48
+
+    this.playBtn = this.add.graphics()
+    this.drawPlayBtn(false)
+    this.rootContainer.add(this.playBtn)
+
+    this.playBtnText = this.add.text(this.cx, this.playBtnY, 'Select OVER or UNDER ↑', {
+      fontSize: '14px', fontStyle: 'bold',
+      fontFamily: 'Arial Black, sans-serif', color: '#4a3a6a',
+    }).setOrigin(0.5)
+    this.rootContainer.add(this.playBtnText)
+
+    this.playBtnHit = this.add.rectangle(this.cx, this.playBtnY, bw, bh)
+      .setInteractive({ useHandCursor: true })
+    this.rootContainer.add(this.playBtnHit)
+
+    this.playBtnHit.on('pointerdown', () => {
+      if (this.isPlacing || this.direction === null) return
+      this.sound.play('click', { volume: 0.6 })
+
+      // Bounce feedback
+      this.tweens.add({
+        targets: [this.playBtn, this.playBtnText],
+        scaleX: 0.96, scaleY: 0.96, duration: 70, yoyo: true, ease: 'Sine.easeOut',
+      })
+
+      // Calculate multiplier for payload
+      const winChance  = this.direction === 'OVER'
+        ? (100 - this.threshold) / 100
+        : this.threshold / 100
+      const multiplier = parseFloat((0.90 / winChance).toFixed(4))
+
+      // In fullscreen mode, page.tsx receives PICK_SELECTED and immediately
+      // sends back PLACE_BET with the current stake from the top bar.
+      window.parent.postMessage({
+        type: 'PICK_SELECTED',
+        payload: {
+          pick:      `${this.direction} ${this.threshold}`,
+          threshold: this.threshold,
+          direction: this.direction,
+          multiplier,
+        },
+      }, this.PARENT_ORIGIN)
+    })
+  }
+
+  private drawPlayBtn(active: boolean) {
+    this.playBtn.clear()
+    const bw = this.scale.width - 48
+    const bh = 48
+    const x  = this.cx - bw / 2
+    const y  = this.playBtnY - bh / 2
+
+    if (active) {
+      // Active: purple gradient style
+      this.playBtn.fillStyle(PRIMARY, 1)
+      this.playBtn.fillRoundedRect(x, y, bw, bh, 14)
+      this.playBtn.fillStyle(0xFFFFFF, 0.12)
+      this.playBtn.fillRoundedRect(x + 4, y + 4, bw * 0.5, bh * 0.42, 10)
+      this.playBtn.lineStyle(2, PRIMARY_ALT, 1)
+      this.playBtn.strokeRoundedRect(x, y, bw, bh, 14)
+    } else {
+      // Inactive: dimmed, no interaction feel
+      this.playBtn.fillStyle(0x1a0040, 1)
+      this.playBtn.fillRoundedRect(x, y, bw, bh, 14)
+      this.playBtn.lineStyle(1.5, 0x3a1a6a, 0.5)
+      this.playBtn.strokeRoundedRect(x, y, bw, bh, 14)
+    }
+  }
+
+  private refreshPlayButton() {
+    const active = this.direction !== null && !this.isPlacing
+    this.drawPlayBtn(active)
+    if (active) {
+      const winChance  = this.direction === 'OVER'
+        ? (100 - this.threshold) / 100
+        : this.threshold / 100
+      const multiplier = (0.90 / winChance).toFixed(2)
+      this.playBtnText.setText(`PLAY · ${multiplier}× · Roll ${this.direction} ${this.threshold}`)
+      this.playBtnText.setColor('#ffffff')
+    } else if (this.isPlacing) {
+      this.playBtnText.setText('⏳ Rolling...')
+      this.playBtnText.setColor('#7B4DBF')
+    } else {
+      this.playBtnText.setText('Select OVER or UNDER ↑')
+      this.playBtnText.setColor('#4a3a6a')
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -315,39 +430,82 @@ export class GameScene extends Phaser.Scene {
 
     this.diceContainer.add([this.diceGlow, this.diceBody, this.diceSheen, this.diceValueText])
 
-    // Ambient glow pulse
     this.tweens.add({
       targets: this.diceGlow, alpha: { from: 0.5, to: 0.95 },
       duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
     })
 
-    // Idle float
     this.diceIdleTween = this.tweens.add({
       targets: this.diceContainer, y: diceY - 7,
       duration: 1700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
     })
   }
 
+  // Lighten/darken helpers for deriving the top/side face shades from the
+  // base front-face color, so the "3D" faces always match the current
+  // dice color (idle purple, win green, loss red) automatically.
+  private shadeColor(color: number, amt: number): number {
+    const r = (color >> 16) & 0xff
+    const g = (color >> 8) & 0xff
+    const b = color & 0xff
+    const adjust = (v: number) => amt >= 0
+      ? Math.min(255, Math.round(v + (255 - v) * amt))
+      : Math.max(0, Math.round(v * (1 + amt)))
+    return (adjust(r) << 16) | (adjust(g) << 8) | adjust(b)
+  }
+
   private drawDiceFace(fillColor: number, borderColor: number) {
-    const s = this.diceSize
+    const s     = this.diceSize
+    const depth = s * 0.18   // how far the top/side faces are offset — the "3D pop"
+
     this.diceBody.clear()
+
     // Drop shadow
     this.diceBody.fillStyle(0x000000, 0.5)
     this.diceBody.fillRoundedRect(-s / 2 + 6, -s / 2 + 8, s, s, 18)
-    // Main face
+
+    const topColor  = this.shadeColor(fillColor, 0.38)   // lighter — catches the light
+    const sideColor = this.shadeColor(fillColor, -0.35)  // darker — falls into shadow
+
+    // Top face — parallelogram, reads as looking down onto the cube
+    this.diceBody.fillStyle(topColor, 1)
+    this.diceBody.beginPath()
+    this.diceBody.moveTo(-s / 2 + 8, -s / 2)
+    this.diceBody.lineTo(-s / 2 + 8 + depth, -s / 2 - depth)
+    this.diceBody.lineTo(s / 2 - 8 + depth, -s / 2 - depth)
+    this.diceBody.lineTo(s / 2 - 8, -s / 2)
+    this.diceBody.closePath()
+    this.diceBody.fillPath()
+
+    // Side face — parallelogram, the cube's right-hand edge
+    this.diceBody.fillStyle(sideColor, 1)
+    this.diceBody.beginPath()
+    this.diceBody.moveTo(s / 2, -s / 2 + 8)
+    this.diceBody.lineTo(s / 2 + depth, -s / 2 + 8 - depth)
+    this.diceBody.lineTo(s / 2 + depth, s / 2 - 8 - depth)
+    this.diceBody.lineTo(s / 2, s / 2 - 8)
+    this.diceBody.closePath()
+    this.diceBody.fillPath()
+
+    // Front face
     this.diceBody.fillStyle(fillColor, 1)
     this.diceBody.fillRoundedRect(-s / 2, -s / 2, s, s, 18)
-    // Inner subtle gradient (brighter centre)
     this.diceBody.fillStyle(0xFFFFFF, 0.04)
     this.diceBody.fillRoundedRect(-s / 2 + 6, -s / 2 + 6, s - 12, s - 12, 13)
-    // Neon border
     this.diceBody.lineStyle(2.5, borderColor, 1)
     this.diceBody.strokeRoundedRect(-s / 2, -s / 2, s, s, 18)
-    // Inner border ring
     this.diceBody.lineStyle(1, borderColor, 0.25)
     this.diceBody.strokeRoundedRect(-s / 2 + 7, -s / 2 + 7, s - 14, s - 14, 12)
 
-    // Corner-highlight sheen
+    // Crisp edge lines on the top/side faces so they read as distinct panels
+    this.diceBody.lineStyle(1.5, borderColor, 0.5)
+    this.diceBody.lineBetween(-s / 2 + 8, -s / 2, -s / 2 + 8 + depth, -s / 2 - depth)
+    this.diceBody.lineBetween(-s / 2 + 8 + depth, -s / 2 - depth, s / 2 - 8 + depth, -s / 2 - depth)
+    this.diceBody.lineBetween(s / 2 - 8 + depth, -s / 2 - depth, s / 2 - 8, -s / 2)
+    this.diceBody.lineBetween(s / 2, -s / 2 + 8, s / 2 + depth, -s / 2 + 8 - depth)
+    this.diceBody.lineBetween(s / 2 + depth, -s / 2 + 8 - depth, s / 2 + depth, s / 2 - 8 - depth)
+    this.diceBody.lineBetween(s / 2 + depth, s / 2 - 8 - depth, s / 2, s / 2 - 8)
+
     this.diceSheen.clear()
     this.diceSheen.fillStyle(0xFFFFFF, 0.15)
     this.diceSheen.fillRoundedRect(-s / 2 + 2, -s / 2 + 2, s * 0.5, s * 0.38, { tl: 15, tr: 6, bl: 0, br: 0 })
@@ -387,7 +545,8 @@ export class GameScene extends Phaser.Scene {
       const pct = (clamped - this.sliderX) / this.sliderW
       this.threshold = Math.round(2 + pct * 96)
       this.drawSlider()
-      this.updateStats()
+      this.updateStatsDisplay()  // only updates display, does NOT post PICK_SELECTED
+      this.refreshPlayButton()
     }
 
     this.sliderHit.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -438,7 +597,6 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Thumb
     this.sliderThumb.clear()
     this.sliderThumb.fillStyle(PRIMARY, 0.28)
     this.sliderThumb.fillCircle(thumbX, this.sliderY, 22)
@@ -448,7 +606,6 @@ export class GameScene extends Phaser.Scene {
     this.sliderThumb.fillCircle(thumbX, this.sliderY, 11)
     this.sliderThumb.lineStyle(2, PRIMARY_ALT, 1)
     this.sliderThumb.strokeCircle(thumbX, this.sliderY, 11)
-    // Specular
     this.sliderThumb.fillStyle(0xFFFFFF, 0.8)
     this.sliderThumb.fillCircle(thumbX - 3, this.sliderY - 3, 3.5)
   }
@@ -484,7 +641,6 @@ export class GameScene extends Phaser.Scene {
     this.overContainer.add([this.overBtn, this.overText])
     this.underContainer.add([this.underBtn, this.underText])
 
-    // Start with null direction — neither button highlighted
     this.drawDirectionButtons()
 
     const overHit  = this.add.rectangle(0, 0, this.btnW, this.btnH).setInteractive({ useHandCursor: true })
@@ -495,22 +651,28 @@ export class GameScene extends Phaser.Scene {
     const press = (c: Phaser.GameObjects.Container) => {
       this.tweens.add({ targets: c, scaleX: 0.93, scaleY: 0.93, duration: 60, yoyo: true, ease: 'Sine.easeOut' })
     }
+
     overHit.on('pointerdown', () => {
+      if (this.isPlacing) return
       press(this.overContainer)
       if (this.direction === 'OVER') return
       this.direction = 'OVER'
       this.drawDirectionButtons()
       this.drawSlider()
-      this.updateStats()
+      this.updateStatsDisplay()
+      this.refreshPlayButton()
       this.sound.play('select', { volume: 0.5 })
     })
+
     underHit.on('pointerdown', () => {
+      if (this.isPlacing) return
       press(this.underContainer)
       if (this.direction === 'UNDER') return
       this.direction = 'UNDER'
       this.drawDirectionButtons()
       this.drawSlider()
-      this.updateStats()
+      this.updateStatsDisplay()
+      this.refreshPlayButton()
       this.sound.play('select', { volume: 0.5 })
     })
   }
@@ -520,17 +682,14 @@ export class GameScene extends Phaser.Scene {
     const bh = this.btnH
     const r  = Math.round(bh / 2)
 
-    // OVER button
     this.overBtn.clear()
     if (this.direction === 'OVER') {
-      // Active state — filled green
       this.overBtn.fillStyle(WIN_COLOR, 1)
       this.overBtn.fillRoundedRect(-bw/2, -bh/2, bw, bh, r)
       this.overBtn.fillStyle(0xFFFFFF, 0.16)
       this.overBtn.fillRoundedRect(-bw/2 + 4, -bh/2 + 4, bw * 0.48, bh * 0.42, r - 2)
       this.overText.setColor('#05001A')
     } else {
-      // Neutral / inactive state — just a bordered outline
       this.overBtn.lineStyle(1.5, this.direction === null ? 0x9B4DFF : 0x3D2060, 0.55)
       this.overBtn.fillStyle(0x0D0030, 1)
       this.overBtn.fillRoundedRect(-bw/2, -bh/2, bw, bh, r)
@@ -538,7 +697,6 @@ export class GameScene extends Phaser.Scene {
       this.overText.setColor(this.direction === null ? '#C87DFF' : '#3D2060')
     }
 
-    // UNDER button
     this.underBtn.clear()
     if (this.direction === 'UNDER') {
       this.underBtn.fillStyle(LOSE_COLOR, 1)
@@ -556,16 +714,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // STATS
+  // STATS — display only, never fires PICK_SELECTED
   // ─────────────────────────────────────────────────────────────────────────
-  private updateStats() {
+  private updateStatsDisplay() {
     if (this.direction === null) {
-      // No direction chosen yet — show neutral placeholder
       this.multiplierText.setText('—')
       this.winChanceText.setText('—')
       return
     }
-    const winChance  = this.direction === 'OVER' ? (100 - this.threshold) / 100 : this.threshold / 100
+    const winChance  = this.direction === 'OVER'
+      ? (100 - this.threshold) / 100
+      : this.threshold / 100
     const multiplier = parseFloat((0.90 / winChance).toFixed(4))
     this.multiplierText.setText(`${multiplier.toFixed(2)}×`)
     this.winChanceText.setText(`Win: ${(winChance * 100).toFixed(2)}%`)
@@ -573,62 +732,45 @@ export class GameScene extends Phaser.Scene {
 
     this.tweens.killTweensOf(this.thresholdText)
     this.tweens.add({ targets: this.thresholdText, scale: 1.1, duration: 90, yoyo: true, ease: 'Sine.easeOut' })
-
-    window.parent.postMessage({
-      type: 'PICK_SELECTED',
-      payload: { pick: `${this.direction} ${this.threshold}`, threshold: this.threshold, direction: this.direction, multiplier },
-    }, this.PARENT_ORIGIN)
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // PLACE BET
   // ─────────────────────────────────────────────────────────────────────────
   public placeBet() {
-    if (this.isPlacing || !this.isAuthenticated || this.direction === null) return
+    if (this.isPlacing || this.direction === null) return
     if (this.currentBalance < this.currentStake) { this.showError('Insufficient balance'); return }
     this.isPlacing = true
-    this.sound.play('click', { volume: 0.6 })
+    this.refreshPlayButton()
 
-    this.diceIdleTween?.stop(); this.diceIdleTween = undefined
-
-    // Phase 1 — Squash (compress down before jump)
-    this.tweens.add({
-      targets: this.diceContainer,
-      scaleX: 1.22, scaleY: 0.72, duration: 100, ease: 'Power3.easeIn',
-      onComplete: () => {
-        // Phase 2 — Launch into air (quick upward pop with rotation)
-        this.tweens.add({
-          targets: this.diceContainer,
-          y: this.diceOriginalY - this.diceSize * 0.85,
-          scaleX: 0.88, scaleY: 0.88,
-          angle: 180,
-          duration: 220, ease: 'Power2.easeOut',
-          onComplete: () => this.startRollCycle()
-        })
-      }
-    })
+    this.diceIdleTween?.stop()
+    this.diceIdleTween = undefined
+    this.diceContainer.setPosition(this.cx, this.diceOriginalY)
+    this.startRollCycle()
 
     this.rollSound = this.sound.add('roll')
     this.rollSound.play({ volume: 0.25, loop: false })
 
     this.bridge.placeBet({
-      game: 'OLM_DICE',
-      stake: this.currentStake,
+      game:       'OLM_DICE',
+      stake:      this.currentStake,
       gameParams: { threshold: this.threshold, direction: this.direction },
       clientSeed: Math.random().toString(36).substring(2),
     })
   }
 
   private startRollCycle() {
-    // Mid-air spin cycle — runs until handleResult fires
+    // No number readout during the spin — just the dice tumbling on the
+    // Z axis (angle rotation) with tick/spark flair. The real number only
+    // appears once the roll has actually resolved, in handleResult().
+    this.diceValueText.setVisible(false)
+    this.rollResultText.setText('Rolling...')
+
     this.tweens.add({
       targets: this.diceContainer,
       angle: '+=360', scaleX: 1, scaleY: 1,
       duration: 320, ease: 'Linear', repeat: -1,
       onRepeat: () => {
-        const rand = (Math.random() * 100).toFixed(2)
-        this.diceValueText.setText(rand)
-        this.rollResultText.setText(rand)
         this.sound.play('tick', { volume: 0.15 })
         this.spawnRollSparks(2)
       }
@@ -636,7 +778,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // HANDLE RESULT — landing animation + result reveal
+  // HANDLE RESULT
   // ─────────────────────────────────────────────────────────────────────────
   private handleResult(result: BetResult) {
     const roll   = (result.result as { roll: number }).roll
@@ -645,24 +787,8 @@ export class GameScene extends Phaser.Scene {
     const newBal = result.newBalance
 
     if (this.rollSound?.isPlaying) this.rollSound.stop()
-
-    // Stop mid-air spin
     this.tweens.killTweensOf(this.diceContainer)
 
-    // Final flash cycle before landing
-    let flashCount = 0
-    const flashTimer = this.time.addEvent({
-      delay: 60, repeat: 8,
-      callback: () => {
-        flashCount++
-        const rand = flashCount < 8 ? (Math.random() * 100).toFixed(2) : roll.toFixed(2)
-        this.diceValueText.setText(rand)
-        this.rollResultText.setText(rand)
-        if (flashCount < 8) this.sound.play('tick', { volume: 0.22 })
-      }
-    })
-
-    // Phase 3 — Fall back down
     this.time.delayedCall(200, () => {
       this.tweens.add({
         targets: this.diceContainer,
@@ -670,26 +796,20 @@ export class GameScene extends Phaser.Scene {
         scaleX: 1.25, scaleY: 0.65,
         duration: 260, ease: 'Power3.easeIn',
         onComplete: () => {
-          flashTimer.remove()
-          this.diceValueText.setText(roll.toFixed(2))
+          // Roll has fully landed — reveal the real number for the first
+          // time here, together with the win/loss face and effects.
+          this.diceValueText.setText(roll.toFixed(2)).setVisible(true)
           this.rollResultText.setText(roll.toFixed(2))
 
-          // Color dice by win/loss
-          if (win) {
-            this.drawDiceFace(0x001a00, WIN_COLOR)
-          } else {
-            this.drawDiceFace(0x1a0000, LOSE_COLOR)
-          }
+          if (win) { this.drawDiceFace(0x001a00, WIN_COLOR) }
+          else     { this.drawDiceFace(0x1a0000, LOSE_COLOR) }
 
-          // Show dots if in range
           const rounded = Math.round(roll)
           if (rounded >= 1 && rounded <= 6) this.showDiceDots(rounded)
 
-          // Phase 4 — Bounce back (overshoot then settle)
           this.tweens.add({
             targets: this.diceContainer,
-            scaleX: 0.88, scaleY: 1.18,
-            duration: 80, ease: 'Power2.easeOut',
+            scaleX: 0.88, scaleY: 1.18, duration: 80, ease: 'Power2.easeOut',
             onComplete: () => {
               this.tweens.add({
                 targets: this.diceContainer,
@@ -702,7 +822,6 @@ export class GameScene extends Phaser.Scene {
             }
           })
 
-          // Impact effects
           this.spawnImpactParticles(win)
           this.spawnShockwave(win)
 
@@ -736,13 +855,7 @@ export class GameScene extends Phaser.Scene {
       g.setPosition(cx + (Math.random() - 0.5) * this.diceSize * 0.5, cy)
       const angle = -Math.PI * 0.5 + (Math.random() - 0.5) * Math.PI * 0.9
       const dist  = 24 + Math.random() * 60
-      this.tweens.add({
-        targets: g,
-        x: cx + Math.cos(angle) * dist,
-        y: cy + Math.sin(angle) * dist,
-        alpha: 0, scale: 0.1, duration: 420 + Math.random() * 200, ease: 'Power2',
-        onComplete: () => g.destroy()
-      })
+      this.tweens.add({ targets: g, x: cx + Math.cos(angle) * dist, y: cy + Math.sin(angle) * dist, alpha: 0, scale: 0.1, duration: 420 + Math.random() * 200, ease: 'Power2', onComplete: () => g.destroy() })
     }
   }
 
@@ -758,11 +871,7 @@ export class GameScene extends Phaser.Scene {
       const sd = this.diceSize * 0.3
       const ed = this.diceSize * 0.75
       g.setPosition(cx + Math.cos(angle) * sd, cy + Math.sin(angle) * sd)
-      this.tweens.add({
-        targets: g, x: cx + Math.cos(angle) * ed, y: cy + Math.sin(angle) * ed,
-        alpha: 0, duration: 240 + Math.random() * 140, ease: 'Power2',
-        onComplete: () => g.destroy()
-      })
+      this.tweens.add({ targets: g, x: cx + Math.cos(angle) * ed, y: cy + Math.sin(angle) * ed, alpha: 0, duration: 240 + Math.random() * 140, ease: 'Power2', onComplete: () => g.destroy() })
     }
   }
 
@@ -773,7 +882,6 @@ export class GameScene extends Phaser.Scene {
     ring.setPosition(this.diceContainer.x, this.diceOriginalY)
     this.tweens.add({ targets: ring, scaleX: 2.8, scaleY: 2.8, alpha: 0, duration: 480, ease: 'Power2', onComplete: () => ring.destroy() })
 
-    // Second outer ring, delayed
     const ring2 = this.add.graphics().setDepth(6)
     ring2.lineStyle(2, win ? WIN_COLOR : LOSE_COLOR, 0.5)
     ring2.strokeCircle(0, 0, this.diceSize * 0.5)
@@ -825,7 +933,9 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: this.overlayText, scale: 1, angle: 0, duration: 380, ease: 'Back.easeOut' })
 
     this.overlaySubText
-      .setText(win ? `₦${payout.toLocaleString()} · Roll: ${roll.toFixed(2)}` : `Rolled ${roll.toFixed(2)} · Better luck next time`)
+      .setText(win
+        ? `₦${payout.toLocaleString()} · Roll: ${roll.toFixed(2)}`
+        : `Rolled ${roll.toFixed(2)} · Better luck next time`)
       .setVisible(true).setAlpha(0)
     this.tweens.add({ targets: this.overlaySubText, alpha: 1, duration: 400, delay: 300 })
 
@@ -859,34 +969,33 @@ export class GameScene extends Phaser.Scene {
           this.overlayText.setVisible(false).setAlpha(1)
           this.overlaySubText.setVisible(false).setAlpha(1)
 
-          // Reset dice visual
           this.drawDiceFace(0x18004A, PRIMARY)
-          this.diceValueText.setText('?').setColor('#ffffff')
+          this.diceValueText.setText('?').setColor('#ffffff').setVisible(true)
           this.rollResultText.setText('')
           this.diceContainer.setScale(1).setAngle(0).setPosition(this.cx, this.diceOriginalY)
 
-          // Remove dots
           const dots = this.diceContainer.list.filter(
             c => c instanceof Phaser.GameObjects.Graphics && c !== this.diceBody && c !== this.diceGlow && c !== this.diceSheen
           )
           dots.forEach(d => (d as Phaser.GameObjects.Graphics).destroy())
 
-          // Resume idle float
           this.diceIdleTween = this.tweens.add({
             targets: this.diceContainer, y: this.diceOriginalY - 7,
             duration: 1700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
           })
 
-          // BUG FIX: reset direction to null so neither button is highlighted
-          // and the player must consciously re-pick OVER or UNDER each round
+          // Reset direction — player must re-pick each round
           this.direction = null
           this.drawDirectionButtons()
           this.drawSlider()
           this.multiplierText.setText('—')
           this.winChanceText.setText('—')
+          this.thresholdText.setText(String(this.threshold))
 
           this.currentBalance = newBalance
           this.isPlacing      = false
+          this.refreshPlayButton()
+
           window.parent.postMessage({ type: 'BET_DONE', payload: { newBalance } }, this.PARENT_ORIGIN)
         }
       })
