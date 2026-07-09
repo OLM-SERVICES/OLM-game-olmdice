@@ -19,34 +19,6 @@ export class GameScene extends Phaser.Scene {
   private threshold: number = 50
   private direction: 'OVER' | 'UNDER' | null = null
 
-  // Slider
-  private sliderTrack!: Phaser.GameObjects.Graphics
-  private sliderFill!:  Phaser.GameObjects.Graphics
-  private sliderGlow!:  Phaser.GameObjects.Graphics
-  private sliderThumb!: Phaser.GameObjects.Graphics
-  private sliderHit!:   Phaser.GameObjects.Rectangle
-
-  // Buttons
-  private overContainer!:  Phaser.GameObjects.Container
-  private underContainer!: Phaser.GameObjects.Container
-  private overBtn!:  Phaser.GameObjects.Graphics
-  private underBtn!: Phaser.GameObjects.Graphics
-  private overText!:  Phaser.GameObjects.Text
-  private underText!: Phaser.GameObjects.Text
-  private btnW: number = 0
-  private btnH: number = 0
-
-  // Play button (in-canvas, fullscreen mode)
-  private playBtn!:        Phaser.GameObjects.Graphics
-  private playBtnText!:    Phaser.GameObjects.Text
-  private playBtnHit!:     Phaser.GameObjects.Rectangle
-  private playBtnY:        number = 0
-
-  // Stats
-  private multiplierText!: Phaser.GameObjects.Text
-  private winChanceText!:  Phaser.GameObjects.Text
-  private thresholdText!:  Phaser.GameObjects.Text
-
   // Dice
   private diceContainer!:  Phaser.GameObjects.Container
   private diceBody!:       Phaser.GameObjects.Graphics
@@ -76,9 +48,6 @@ export class GameScene extends Phaser.Scene {
 
   private rootContainer!: Phaser.GameObjects.Container
   private cx: number = 0
-  private sliderX: number = 0
-  private sliderY: number = 0
-  private sliderW: number = 0
 
   private rollSound!: Phaser.Sound.BaseSound
   private messageHandler: ((event: MessageEvent) => void) | null = null
@@ -117,12 +86,31 @@ export class GameScene extends Phaser.Scene {
     this.messageHandler = (event: MessageEvent) => {
       if (this.PARENT_ORIGIN !== '*' && event.origin !== this.PARENT_ORIGIN) return
       const { type, payload } = event.data || {}
-      // In fullscreen mode page.tsx sends PLACE_BET after receiving PICK_SELECTED.
-      // We only send PICK_SELECTED from the Play button, so PLACE_BET arrives here
-      // with the stake already set by the top bar.
+
+      // The pick UI (OVER/UNDER + slider) now lives in the React panel.
+      // It pushes the current direction/threshold here so the dice can
+      // stay in sync, and so the matching sound effect still plays —
+      // previously that lived in the in-canvas button/slider handlers.
+      if (type === 'PICK_SELECTED') {
+        const directionChanged = !!payload?.direction && payload.direction !== this.direction
+        const thresholdChanged = payload?.threshold != null && payload.threshold !== this.threshold
+
+        if (payload?.direction) this.direction = payload.direction
+        if (payload?.threshold != null) this.threshold = payload.threshold
+
+        if (directionChanged) {
+          this.sound.play('select', { volume: 0.5 })
+        } else if (thresholdChanged) {
+          this.sound.play('tick', { volume: 0.18 })
+        }
+        return
+      }
+
       if (type === 'PLACE_BET') {
         if (this.isPlacing) return
         this.currentStake = payload.stake
+        if (payload?.direction) this.direction = payload.direction
+        if (payload?.threshold != null) this.threshold = payload.threshold
         this.placeBet()
       }
     }
@@ -141,11 +129,8 @@ export class GameScene extends Phaser.Scene {
 
     // Safety net: on mobile, canvas.clientWidth/clientHeight often hasn't
     // settled to its true final value at the exact instant create() runs
-    // (address bar collapsing, iframe layout timing). setupUI() bakes the
-    // Play button position in as a fixed pixel offset from H, so a bad
-    // initial read pushes it off the bottom of the real viewport with
-    // nothing to correct it afterwards. This second pass re-measures and
-    // rebuilds once the layout has had a moment to settle.
+    // (address bar collapsing, iframe layout timing). This second pass
+    // re-measures and rebuilds once the layout has had a moment to settle.
     this.time.delayedCall(150, () => {
       if (!this.isPlacing) this.setupUI()
     })
@@ -191,49 +176,20 @@ export class GameScene extends Phaser.Scene {
     this.aurora2 = this.add.graphics()
     this.rootContainer.add([this.aurora1, this.aurora2])
 
-    // ── Layout — bottom-up so Play button is always on screen ──────────
-    //
-    // Pin from bottom:
-    //   24px  bottom margin
-    //   48px  Play button
-    //   12px  gap
-    //   48px  OVER / UNDER buttons
-    //   18px  gap
-    //   stats row (multiplier + win %)
-    //   18px  gap
-    //   slider
-    //   14px  gap
-    //   threshold number
-    //   dice zone (fills remaining space)
-    //   title + subtitle at top
+    // ── Layout — title up top, dice fills the rest. The pick UI (slider,
+    // OVER/UNDER, stats, Play button) all live in the React panel now, so
+    // the canvas only needs to lay out the title and the dice animation.
+    const titleSize = Math.round(Math.min(W * 0.095, 36))
+    const subSize   = Math.round(Math.min(W * 0.028, 11))
+    const titleY    = Math.max(24, H * 0.08)
+    const subY      = titleY + Math.round(titleSize * 0.72) + 8
 
-    const PLAY_BTN_H   = 48
-    const PLAY_MARGIN  = 24
-    const DIR_BTN_H    = 44
-    const DIR_GAP      = 12
-
-    this.playBtnY      = H - PLAY_MARGIN - PLAY_BTN_H / 2
-    const dirBtnY      = this.playBtnY - PLAY_BTN_H / 2 - DIR_GAP - DIR_BTN_H / 2
-    const statsY       = dirBtnY - DIR_BTN_H / 2 - 18 - 10
-    const sliderZoneY  = statsY - 22 - 10
-    const threshY      = sliderZoneY - 52 - 14
-    const threshSize   = Math.round(Math.min(W * 0.115, 44))
-
-    const titleSize    = Math.round(Math.min(W * 0.095, 36))
-    const subSize      = Math.round(Math.min(W * 0.028, 11))
-    const titleY       = Math.max(24, H * 0.052)
-    const subY         = titleY + Math.round(titleSize * 0.72) + 8
-
-    // Dice fills the zone between subtitle and threshold number
-    const diceTop      = subY + subSize + 14
-    const diceBottom   = threshY - threshSize / 2 - 10
-    const diceZoneH    = diceBottom - diceTop
-    this.diceSize      = Math.round(Math.min(W * 0.30, diceZoneH * 0.70, 132))
-    const diceY        = diceTop + diceZoneH / 2
-    const resultLabelY = diceBottom - 2
-
-    this.btnH = DIR_BTN_H
-    this.btnW = Math.round(W * 0.38)
+    const diceTop    = subY + subSize + 20
+    const diceBottom = H - 24
+    const diceZoneH  = Math.max(diceBottom - diceTop, 80)
+    this.diceSize    = Math.round(Math.min(W * 0.34, diceZoneH * 0.55, 160))
+    const diceY      = diceTop + diceZoneH / 2
+    const resultLabelY = Math.min(diceY + this.diceSize * 0.5 + 26, H - 16)
 
     // ── Title ──────────────────────────────────────────────────────────
     this.titleGlow = this.add.text(cx, titleY, 'OLM DICE', {
@@ -263,44 +219,6 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0.5)
     this.rootContainer.add(this.rollResultText)
 
-    // ── Threshold ──────────────────────────────────────────────────────
-    this.thresholdText = this.add.text(cx, threshY, String(this.threshold), {
-      fontSize: `${threshSize}px`, fontFamily: 'Arial Black, sans-serif',
-      fontStyle: 'bold', color: '#ffffff',
-    }).setOrigin(0.5)
-    this.rootContainer.add(this.thresholdText)
-
-    // ── Slider ─────────────────────────────────────────────────────────
-    this.setupSlider(W, sliderZoneY)
-
-    // ── Stats row ──────────────────────────────────────────────────────
-    const statSize = Math.round(Math.min(W * 0.044, 17))
-    const statXL   = cx - W * 0.22
-    const statXR   = cx + W * 0.22
-
-    this.multiplierText = this.add.text(statXL, statsY, '—', {
-      fontSize: `${statSize}px`, fontFamily: 'Arial, sans-serif',
-      color: '#FFD700', fontStyle: 'bold',
-    }).setOrigin(0.5)
-    this.rootContainer.add(this.multiplierText)
-
-    this.winChanceText = this.add.text(statXR, statsY, '—', {
-      fontSize: `${Math.round(statSize * 0.85)}px`, fontFamily: 'Arial, sans-serif',
-      color: '#9B4DFF',
-    }).setOrigin(0.5)
-    this.rootContainer.add(this.winChanceText)
-
-    const divLine = this.add.graphics()
-    divLine.lineStyle(1, 0x9B4DFF, 0.25)
-    divLine.lineBetween(cx, statsY - 10, cx, statsY + 10)
-    this.rootContainer.add(divLine)
-
-    // ── OVER / UNDER buttons ───────────────────────────────────────────
-    this.setupDirectionButtons(W, dirBtnY)
-
-    // ── Play button (in-canvas, fullscreen) ────────────────────────────
-    this.setupPlayButton(W)
-
     // ── Overlay ────────────────────────────────────────────────────────
     this.overlay = this.add.graphics().setVisible(false).setDepth(10)
     this.overlayText = this.add.text(cx, H / 2 - 36, '', {
@@ -314,107 +232,6 @@ export class GameScene extends Phaser.Scene {
 
     this.uiInitialized = true
     this.startTitleGlitch()
-
-    // If this is a rebuild (resize/orientation change) after the player
-    // already picked OVER/UNDER, resync the stats row and Play button to
-    // that state — otherwise a resize mid-selection would visually reset
-    // to "Select OVER or UNDER" while this.direction is still set.
-    this.updateStatsDisplay()
-    this.refreshPlayButton()
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // PLAY BUTTON
-  // ─────────────────────────────────────────────────────────────────────────
-  private setupPlayButton(W: number) {
-    const bw = W - 48
-    const bh = 48
-
-    this.playBtn = this.add.graphics()
-    this.drawPlayBtn(false)
-    this.rootContainer.add(this.playBtn)
-
-    this.playBtnText = this.add.text(this.cx, this.playBtnY, 'Select OVER or UNDER ↑', {
-      fontSize: '14px', fontStyle: 'bold',
-      fontFamily: 'Arial Black, sans-serif', color: '#4a3a6a',
-    }).setOrigin(0.5)
-    this.rootContainer.add(this.playBtnText)
-
-    this.playBtnHit = this.add.rectangle(this.cx, this.playBtnY, bw, bh)
-      .setInteractive({ useHandCursor: true })
-    this.rootContainer.add(this.playBtnHit)
-
-    this.playBtnHit.on('pointerdown', () => {
-      if (this.isPlacing || this.direction === null) return
-      this.sound.play('click', { volume: 0.6 })
-
-      // Bounce feedback
-      this.tweens.add({
-        targets: [this.playBtn, this.playBtnText],
-        scaleX: 0.96, scaleY: 0.96, duration: 70, yoyo: true, ease: 'Sine.easeOut',
-      })
-
-      // Calculate multiplier for payload
-      const winChance  = this.direction === 'OVER'
-        ? (100 - this.threshold) / 100
-        : this.threshold / 100
-      const multiplier = parseFloat((0.90 / winChance).toFixed(4))
-
-      // In fullscreen mode, page.tsx receives PICK_SELECTED and immediately
-      // sends back PLACE_BET with the current stake from the top bar.
-      window.parent.postMessage({
-        type: 'PICK_SELECTED',
-        payload: {
-          pick:      `${this.direction} ${this.threshold}`,
-          threshold: this.threshold,
-          direction: this.direction,
-          multiplier,
-        },
-      }, this.PARENT_ORIGIN)
-    })
-  }
-
-  private drawPlayBtn(active: boolean) {
-    this.playBtn.clear()
-    const bw = this.scale.width - 48
-    const bh = 48
-    const x  = this.cx - bw / 2
-    const y  = this.playBtnY - bh / 2
-
-    if (active) {
-      // Active: purple gradient style
-      this.playBtn.fillStyle(PRIMARY, 1)
-      this.playBtn.fillRoundedRect(x, y, bw, bh, 14)
-      this.playBtn.fillStyle(0xFFFFFF, 0.12)
-      this.playBtn.fillRoundedRect(x + 4, y + 4, bw * 0.5, bh * 0.42, 10)
-      this.playBtn.lineStyle(2, PRIMARY_ALT, 1)
-      this.playBtn.strokeRoundedRect(x, y, bw, bh, 14)
-    } else {
-      // Inactive: dimmed, no interaction feel
-      this.playBtn.fillStyle(0x1a0040, 1)
-      this.playBtn.fillRoundedRect(x, y, bw, bh, 14)
-      this.playBtn.lineStyle(1.5, 0x3a1a6a, 0.5)
-      this.playBtn.strokeRoundedRect(x, y, bw, bh, 14)
-    }
-  }
-
-  private refreshPlayButton() {
-    const active = this.direction !== null && !this.isPlacing
-    this.drawPlayBtn(active)
-    if (active) {
-      const winChance  = this.direction === 'OVER'
-        ? (100 - this.threshold) / 100
-        : this.threshold / 100
-      const multiplier = (0.90 / winChance).toFixed(2)
-      this.playBtnText.setText(`PLAY · ${multiplier}× · Roll ${this.direction} ${this.threshold}`)
-      this.playBtnText.setColor('#ffffff')
-    } else if (this.isPlacing) {
-      this.playBtnText.setText('⏳ Rolling...')
-      this.playBtnText.setColor('#7B4DBF')
-    } else {
-      this.playBtnText.setText('Select OVER or UNDER ↑')
-      this.playBtnText.setColor('#4a3a6a')
-    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -529,234 +346,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // SLIDER
-  // ─────────────────────────────────────────────────────────────────────────
-  private setupSlider(W: number, sliderY: number) {
-    this.sliderW = W * 0.80
-    this.sliderX = (W - this.sliderW) / 2
-    this.sliderY = sliderY
-
-    this.sliderGlow  = this.add.graphics()
-    this.sliderTrack = this.add.graphics()
-    this.sliderFill  = this.add.graphics()
-    this.sliderThumb = this.add.graphics()
-    this.rootContainer.add([this.sliderGlow, this.sliderTrack, this.sliderFill, this.sliderThumb])
-
-    this.drawSlider()
-
-    this.tweens.add({
-      targets: this.sliderGlow, alpha: { from: 0.3, to: 0.7 },
-      duration: 1200, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
-    })
-
-    this.sliderHit = this.add.rectangle(
-      this.sliderX + this.sliderW / 2, this.sliderY,
-      this.sliderW + 44, 56
-    ).setInteractive({ draggable: true, useHandCursor: true })
-    this.rootContainer.add(this.sliderHit)
-
-    const setFromX = (x: number) => {
-      const clamped = Phaser.Math.Clamp(x, this.sliderX, this.sliderX + this.sliderW)
-      const pct = (clamped - this.sliderX) / this.sliderW
-      this.threshold = Math.round(2 + pct * 96)
-      this.drawSlider()
-      this.updateStatsDisplay()  // only updates display, does NOT post PICK_SELECTED
-      this.refreshPlayButton()
-    }
-
-    this.sliderHit.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      setFromX(pointer.x)
-      this.sound.play('tick', { volume: 0.28 })
-      this.spawnThumbRing()
-    })
-    this.sliderHit.on('drag', (_p: Phaser.Input.Pointer, dragX: number) => {
-      setFromX(dragX)
-      this.sound.play('tick', { volume: 0.18 })
-    })
-  }
-
-  private drawSlider() {
-    const thumbX = this.sliderX + ((this.threshold - 2) / 96) * this.sliderW
-    const trackH = 12
-    const r      = trackH / 2
-
-    this.sliderGlow.clear()
-    this.sliderGlow.fillStyle(PRIMARY, 0.15)
-    this.sliderGlow.fillRoundedRect(this.sliderX - 5, this.sliderY - trackH - 3, this.sliderW + 10, trackH * 2 + 6, r + 5)
-
-    this.sliderTrack.clear()
-    this.sliderTrack.fillStyle(0x0A001E, 1)
-    this.sliderTrack.fillRoundedRect(this.sliderX, this.sliderY - r, this.sliderW, trackH, r)
-    this.sliderTrack.lineStyle(1, PRIMARY, 0.2)
-    this.sliderTrack.strokeRoundedRect(this.sliderX, this.sliderY - r, this.sliderW, trackH, r)
-
-    this.sliderFill.clear()
-    const dir = this.direction ?? 'OVER'
-    if (dir === 'OVER') {
-      if (thumbX > this.sliderX + r) {
-        this.sliderFill.fillStyle(LOSE_COLOR, 0.65)
-        this.sliderFill.fillRoundedRect(this.sliderX, this.sliderY - r, thumbX - this.sliderX, trackH, r)
-      }
-      if (thumbX < this.sliderX + this.sliderW - r) {
-        this.sliderFill.fillStyle(WIN_COLOR, 0.65)
-        this.sliderFill.fillRoundedRect(thumbX, this.sliderY - r, this.sliderX + this.sliderW - thumbX, trackH, r)
-      }
-    } else {
-      if (thumbX > this.sliderX + r) {
-        this.sliderFill.fillStyle(WIN_COLOR, 0.65)
-        this.sliderFill.fillRoundedRect(this.sliderX, this.sliderY - r, thumbX - this.sliderX, trackH, r)
-      }
-      if (thumbX < this.sliderX + this.sliderW - r) {
-        this.sliderFill.fillStyle(LOSE_COLOR, 0.65)
-        this.sliderFill.fillRoundedRect(thumbX, this.sliderY - r, this.sliderX + this.sliderW - thumbX, trackH, r)
-      }
-    }
-
-    this.sliderThumb.clear()
-    this.sliderThumb.fillStyle(PRIMARY, 0.28)
-    this.sliderThumb.fillCircle(thumbX, this.sliderY, 22)
-    this.sliderThumb.fillStyle(0xFFFFFF, 0.12)
-    this.sliderThumb.fillCircle(thumbX, this.sliderY, 16)
-    this.sliderThumb.fillStyle(0xFFFFFF, 1)
-    this.sliderThumb.fillCircle(thumbX, this.sliderY, 11)
-    this.sliderThumb.lineStyle(2, PRIMARY_ALT, 1)
-    this.sliderThumb.strokeCircle(thumbX, this.sliderY, 11)
-    this.sliderThumb.fillStyle(0xFFFFFF, 0.8)
-    this.sliderThumb.fillCircle(thumbX - 3, this.sliderY - 3, 3.5)
-  }
-
-  private spawnThumbRing() {
-    const thumbX = this.sliderX + ((this.threshold - 2) / 96) * this.sliderW
-    const ring = this.add.graphics().setDepth(4)
-    ring.lineStyle(2, PRIMARY_ALT, 0.85)
-    ring.strokeCircle(0, 0, 12)
-    ring.setPosition(thumbX, this.sliderY)
-    this.tweens.add({ targets: ring, scaleX: 3, scaleY: 3, alpha: 0, duration: 360, ease: 'Power2', onComplete: () => ring.destroy() })
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // DIRECTION BUTTONS
-  // ─────────────────────────────────────────────────────────────────────────
-  private setupDirectionButtons(W: number, btnY: number) {
-    const gap   = W * 0.05
-    const overX = this.cx - gap / 2 - this.btnW / 2
-    const undX  = this.cx + gap / 2 + this.btnW / 2
-
-    this.overContainer  = this.add.container(overX, btnY)
-    this.underContainer = this.add.container(undX, btnY)
-    this.rootContainer.add([this.overContainer, this.underContainer])
-
-    this.overBtn  = this.add.graphics()
-    this.underBtn = this.add.graphics()
-
-    const fontSize = `${Math.round(Math.min(W * 0.042, 16))}px`
-    this.overText  = this.add.text(0, 0, 'OVER',  { fontSize, fontFamily: 'Arial Black, sans-serif', color: '#ffffff' }).setOrigin(0.5)
-    this.underText = this.add.text(0, 0, 'UNDER', { fontSize, fontFamily: 'Arial Black, sans-serif', color: '#ffffff' }).setOrigin(0.5)
-
-    this.overContainer.add([this.overBtn, this.overText])
-    this.underContainer.add([this.underBtn, this.underText])
-
-    this.drawDirectionButtons()
-
-    const overHit  = this.add.rectangle(0, 0, this.btnW, this.btnH).setInteractive({ useHandCursor: true })
-    const underHit = this.add.rectangle(0, 0, this.btnW, this.btnH).setInteractive({ useHandCursor: true })
-    this.overContainer.add(overHit)
-    this.underContainer.add(underHit)
-
-    const press = (c: Phaser.GameObjects.Container) => {
-      this.tweens.add({ targets: c, scaleX: 0.93, scaleY: 0.93, duration: 60, yoyo: true, ease: 'Sine.easeOut' })
-    }
-
-    overHit.on('pointerdown', () => {
-      if (this.isPlacing) return
-      press(this.overContainer)
-      if (this.direction === 'OVER') return
-      this.direction = 'OVER'
-      this.drawDirectionButtons()
-      this.drawSlider()
-      this.updateStatsDisplay()
-      this.refreshPlayButton()
-      this.sound.play('select', { volume: 0.5 })
-    })
-
-    underHit.on('pointerdown', () => {
-      if (this.isPlacing) return
-      press(this.underContainer)
-      if (this.direction === 'UNDER') return
-      this.direction = 'UNDER'
-      this.drawDirectionButtons()
-      this.drawSlider()
-      this.updateStatsDisplay()
-      this.refreshPlayButton()
-      this.sound.play('select', { volume: 0.5 })
-    })
-  }
-
-  private drawDirectionButtons() {
-    const bw = this.btnW
-    const bh = this.btnH
-    const r  = Math.round(bh / 2)
-
-    this.overBtn.clear()
-    if (this.direction === 'OVER') {
-      this.overBtn.fillStyle(WIN_COLOR, 1)
-      this.overBtn.fillRoundedRect(-bw/2, -bh/2, bw, bh, r)
-      this.overBtn.fillStyle(0xFFFFFF, 0.16)
-      this.overBtn.fillRoundedRect(-bw/2 + 4, -bh/2 + 4, bw * 0.48, bh * 0.42, r - 2)
-      this.overText.setColor('#05001A')
-    } else {
-      this.overBtn.lineStyle(1.5, this.direction === null ? 0x9B4DFF : 0x3D2060, 0.55)
-      this.overBtn.fillStyle(0x0D0030, 1)
-      this.overBtn.fillRoundedRect(-bw/2, -bh/2, bw, bh, r)
-      this.overBtn.strokeRoundedRect(-bw/2, -bh/2, bw, bh, r)
-      this.overText.setColor(this.direction === null ? '#C87DFF' : '#3D2060')
-    }
-
-    this.underBtn.clear()
-    if (this.direction === 'UNDER') {
-      this.underBtn.fillStyle(LOSE_COLOR, 1)
-      this.underBtn.fillRoundedRect(-bw/2, -bh/2, bw, bh, r)
-      this.underBtn.fillStyle(0xFFFFFF, 0.16)
-      this.underBtn.fillRoundedRect(-bw/2 + 4, -bh/2 + 4, bw * 0.48, bh * 0.42, r - 2)
-      this.underText.setColor('#ffffff')
-    } else {
-      this.underBtn.lineStyle(1.5, this.direction === null ? 0x9B4DFF : 0x3D2060, 0.55)
-      this.underBtn.fillStyle(0x0D0030, 1)
-      this.underBtn.fillRoundedRect(-bw/2, -bh/2, bw, bh, r)
-      this.underBtn.strokeRoundedRect(-bw/2, -bh/2, bw, bh, r)
-      this.underText.setColor(this.direction === null ? '#C87DFF' : '#3D2060')
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // STATS — display only, never fires PICK_SELECTED
-  // ─────────────────────────────────────────────────────────────────────────
-  private updateStatsDisplay() {
-    if (this.direction === null) {
-      this.multiplierText.setText('—')
-      this.winChanceText.setText('—')
-      return
-    }
-    const winChance  = this.direction === 'OVER'
-      ? (100 - this.threshold) / 100
-      : this.threshold / 100
-    const multiplier = parseFloat((0.90 / winChance).toFixed(4))
-    this.multiplierText.setText(`${multiplier.toFixed(2)}×`)
-    this.winChanceText.setText(`Win: ${(winChance * 100).toFixed(2)}%`)
-    this.thresholdText.setText(String(this.threshold))
-
-    this.tweens.killTweensOf(this.thresholdText)
-    this.tweens.add({ targets: this.thresholdText, scale: 1.1, duration: 90, yoyo: true, ease: 'Sine.easeOut' })
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
   // PLACE BET
   // ─────────────────────────────────────────────────────────────────────────
   public placeBet() {
     if (this.isPlacing || this.direction === null) return
     if (this.currentBalance < this.currentStake) { this.showError('Insufficient balance'); return }
     this.isPlacing = true
-    this.refreshPlayButton()
 
     this.diceIdleTween?.stop()
     this.diceIdleTween = undefined
@@ -999,17 +594,13 @@ export class GameScene extends Phaser.Scene {
             duration: 1700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
           })
 
-          // Reset direction — player must re-pick each round
+          // Reset direction — player must re-pick each round (the React
+          // panel resets its own direction/threshold state independently
+          // on BET_DONE, this just keeps the canvas's copy in sync).
           this.direction = null
-          this.drawDirectionButtons()
-          this.drawSlider()
-          this.multiplierText.setText('—')
-          this.winChanceText.setText('—')
-          this.thresholdText.setText(String(this.threshold))
 
           this.currentBalance = newBalance
           this.isPlacing      = false
-          this.refreshPlayButton()
 
           window.parent.postMessage({ type: 'BET_DONE', payload: { newBalance } }, this.PARENT_ORIGIN)
         }
